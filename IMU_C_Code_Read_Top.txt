@@ -1,0 +1,320 @@
+//Tasks to do
+
+
+//1. Get Accelerometer reading from IMU
+//2. Get Gyro reading from IMU
+//3. Change Gyroscopes full scale ranges
+//4. Change accelerometer full scale ranges.
+//5.Control LED L based on IMU reading.
+
+
+//Ok so I dont know if this is even allowed, but for now im going to use WIRE.H for I2C communication, until I understand how the registers in the IMU work.
+//ENDED UP NOT USING WIRE.H
+//https://docs.arduino.cc/learn/communication/wire/#wire-library
+
+
+//GETTING FROM SERVO SIDE
+#include <Servo.h>
+#define LED_L 13
+#define LED_D3 11
+#define SERVO_PIN 6
+
+
+float g = 9.8;
+int brighness_D3 = 0;
+
+
+Servo myservo;
+
+
+
+
+
+
+
+
+//
+
+
+
+
+//So Im not fully sure about this address, from my understanding tho its either 0x68 or 0x69
+#define MPU6050_ADDRESS 0x68  // MPU6050 I2C address
+
+
+//Ill now define all of the registers in the MPU6050 that we need.
+
+
+//Accelerometer Measurements
+//Config  (PAGE 15 4.5)
+#define Accel_Config 0x1C
+//Measurements (Page 29 4.17)
+//Xout
+#define ACCEL_XOUT_15_8 0x3B
+#define ACCEL_XOUT_7_0 0x3C
+//Yout
+#define ACCEL_YOUT_15_8 0x3D
+#define ACCEL_YOUT_7_0 0x3E
+//Zout
+#define ACCEL_ZOUT_15_8 0x3F
+#define ACCEL_ZOUT_7_0 0x40
+
+
+//Gyro Measurements
+//config (Page 14 4.4)
+#define Gyro_Config 0x1B
+//Measurements (Page 31 4.19)
+//Xout
+#define Gyro_XOUT_15_8 0x43
+#define Gyro_XOUT_7_0 0x44
+//Yout
+#define Gyro_YOUT_15_8 0x45
+#define Gyro_YOUT_7_0 0x46
+//Zout
+#define Gyro_ZOUT_15_8 0x47
+#define Gyro_ZOUT_7_0 0x48
+
+
+//Testing
+#define PWR_MGMT_1 0x6B
+
+
+void writeRegister(uint8_t reg, uint8_t value) {
+    i2c_start();
+    i2c_write(MPU6050_ADDRESS << 1); // MPU6050 address with write bit
+    i2c_write(reg); // Register address
+    i2c_write(value); // Value to write
+    i2c_stop();
+}
+
+
+void initMPU6050() {
+    writeRegister(PWR_MGMT_1, 0x00); // Wake up MPU6050
+    TWBR = 12;
+    TWSR = 0;
+}
+
+
+
+
+//Setting up I2C communication instead of wire.h
+//page 183 of the Atmega 328 p datasheet has some example code I will use to set up my I2C stuff.
+
+
+//From page 183 of the atmega 328p datasheet, Table 21-2
+void i2c_start(){
+  TWCR = (1<<TWINT)|(1<<TWSTA)| (1<<TWEN);
+  while (!(TWCR & (1<<TWINT)));
+  //There is more checking code, which m not sure if it is needed.
+}
+void i2c_stop(){
+  TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO); //I DONT SEE ANY WAITING STUFF, THAT MIGHT POTENTIALLY MAKE ISSUES LATER.
+}
+void i2c_write(uint8_t x){
+  TWDR = x;
+  TWCR = (1<<TWINT) | (1<<TWEN);
+  while (!(TWCR & (1<<TWINT)));
+}
+//In terms of reading it was really interesting. https://www.ti.com/lit/an/slva704/slva704.pdf?ts=1709184040864&ref_url=https%253A%252F%252Fwww.google.de%252F
+//this resource by Texas Instruments explained how we should set up ACK and NACK and why we need ACK / Nack.
+
+
+uint8_t i2c_read_without_ack(){
+  TWCR = (1 << TWINT) | (1 << TWEN);
+  while(!((1 << TWINT) & TWCR));
+  return TWDR;
+}
+
+
+//Look into TWEA
+uint8_t i2c_read_with_ack(){
+  TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWEA);
+  while(!((1 << TWINT) & TWCR));
+  return TWDR;
+}
+
+
+int16_t read_accel_x(){
+  int16_t accel_X;
+  i2c_start();
+  i2c_write((MPU6050_ADDRESS << 1) | 0);
+  i2c_write(ACCEL_XOUT_15_8);
+  i2c_start();
+  i2c_write((MPU6050_ADDRESS << 1) | 1);
+  uint8_t bits15_8 = i2c_read_with_ack();
+  uint8_t bits0_7 = i2c_read_without_ack();
+  accel_X = (bits15_8 << 8) | bits0_7;
+  i2c_stop();
+
+
+  return accel_X;
+}
+
+
+int16_t read_gyro_z_Yaw(){
+  int16_t gyro_z;
+  i2c_start();
+  i2c_write((MPU6050_ADDRESS << 1) | 0);
+  i2c_write(Gyro_ZOUT_15_8);
+  i2c_start();
+  i2c_write((MPU6050_ADDRESS << 1) | 1);
+  uint8_t bits15_8 = i2c_read_with_ack();
+  uint8_t bits0_7 = i2c_read_without_ack();
+  gyro_z = (bits15_8 << 8) | bits0_7;
+  i2c_stop();
+  return gyro_z;
+}
+
+
+//Page 14 of datasheet explains this. (register map)
+int set_gyro_range(uint8_t val){
+  i2c_start();
+  i2c_write((MPU6050_ADDRESS << 1) | 0);
+  i2c_write(Gyro_Config);
+  i2c_write((val));
+  i2c_stop();
+  return val;
+}
+
+
+//Page 14 of the datasheet explains FS_SEL and its relation to full scale range. (register map)
+//Page 12 of the MPU6050 data sheet NOT REGISTER MAP  shows the sensitivity scale factors.
+float gyro_output(int16_t gyrodata, uint8_t full_scale_range_mode){
+  float dividebyme;
+  switch(full_scale_range_mode){
+    case 0: //+- 250 degrees/sec
+      dividebyme = 131.0;
+      break;
+    case 1: //+- 500 degrees/sec
+      dividebyme = 65.5;
+      break;
+    case 2: //+- 1000 degrees/sec
+      dividebyme = 32.8;
+      break;
+    case 3: //+- 2000 degrees/sec
+      dividebyme = 16.4;
+      break;
+  }
+  return gyrodata / dividebyme;
+}
+int set_accel_range(uint8_t val){
+  i2c_start();
+  i2c_write((MPU6050_ADDRESS << 1) | 0);
+  i2c_write(Accel_Config);
+  i2c_write((val));
+  i2c_stop();
+  return val;
+}
+
+
+//Page 14 of the datasheet explains FS_SEL and its relation to full scale range. (register map)
+//Page 12 of the MPU6050 data sheet NOT REGISTER MAP  shows the sensitivity scale factors.
+float accel_output(int16_t acceldata, uint8_t full_scale_range_mode){
+  float dividebyme;
+  switch(full_scale_range_mode){
+    case 0: //+- 2g
+      dividebyme = 16384;
+      break;
+    case 1: //+- 4g
+      dividebyme = 8192;
+      break;
+    case 2: //+- 8g
+      dividebyme = 4096;
+      break;
+    case 3: //+- 16g
+      dividebyme = 2048;
+      break;
+  }
+  return acceldata / dividebyme;
+}
+
+
+//SERVO AND LED STUFF
+
+
+void write_servo(int yaw){//yaw = mpu.getAngleZ();
+      if(abs(yaw) <= 85){
+    myservo.write(yaw+90);
+    delay(50);
+    digitalWrite(LED_L, LOW);
+    }
+    else if(abs(yaw) > 85){
+    digitalWrite(LED_L, HIGH);
+    }
+  }
+
+
+
+
+ void control_D3(int x_acc){ // mpu.getAccX();
+      if(abs(x_acc) < (0.08 * g)){
+        brighness_D3 = 0;
+      }
+      if(abs(x_acc) > (1.08 * g)){
+        brighness_D3 = 255;
+      }
+      if(abs(x_acc)  <= (1.08 * g) && abs(x_acc)  >= (0.08 * g) ){
+        brighness_D3 = map(abs(x_acc),0.08,1.08,0,255);
+      }
+      analogWrite(LED_D3, 255-brighness_D3); // inverted logic
+  }
+
+
+  // DONE SERVO AND LED STUFF
+
+
+
+
+long previous_time = 0;
+float angle_z_yaw = 0;
+float yaw_drift_correction = 0;
+void setup() {
+  //Wire.begin(); //Starting Wire
+  Serial.begin(9600); //Starting UART communication between atmega328p and computer. (CAN EASILY BE SWITCHED TO UART WITH EARLIER CODE.)
+  initMPU6050();
+  myservo.attach(SERVO_PIN);
+
+
+}
+
+
+void loop() {
+//Change these to fix / change the mode of the output
+int Gyro_Full_Scale_Range_mode = 0;
+int Accel_Full_Scale_Range_mode = 0;
+int16_t accel_x = accel_output(read_accel_x, set_accel_range(Accel_Full_Scale_Range_mode));
+
+
+  /*
+ int16_t accel_x = read_accel_x();
+ int Gyro_Full_Scale_Range_mode = 0;
+ Serial.print("Gyro z");
+ Serial.println(gyro_output(read_gyro_z_Yaw(),set_gyro_range(Gyro_Full_Scale_Range_mode)));
+Serial.println("TESTTT"); */
+
+
+//https://www.arduino.cc/reference/en/language/functions/time/micros/
+long current_time = micros();
+float delta_time = (current_time - previous_time) / 1000000.0;
+previous_time = current_time;
+angle_z_yaw += gyro_output(read_gyro_z_Yaw(),set_gyro_range(Gyro_Full_Scale_Range_mode)) * delta_time;
+float angle_z_yaw_corrected = 0;
+if(angle_z_yaw > 0){
+  angle_z_yaw_corrected = angle_z_yaw - yaw_drift_correction;
+} else {
+  angle_z_yaw_corrected = angle_z_yaw + yaw_drift_correction;
+}
+Serial.print("Yaw: ");
+Serial.println(angle_z_yaw_corrected);
+//removed due to mess with -
+//When I was testing it was drifting by 0.6 every output, so this should correct it.
+//yaw_drift_correction += 0.6;
+yaw_drift_correction += 0;
+ delay(50);
+  write_servo((int) angle_z_yaw_corrected);
+  delay(50);
+  control_D3((int) read_accel_x());
+delay(1000);
+
+
+}
