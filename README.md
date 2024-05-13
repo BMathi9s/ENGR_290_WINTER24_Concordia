@@ -5,3 +5,8 @@ also using fully arduio libraries coz i know hwo to do in C but i dont have time
 
 Like the us sensor library returnin 0.0 when out of range ~~
 of the mpu library with drift correction
+
+
+ALSOOOOO
+For PID implementation i took referece that project ->
+https://github.com/maarten-pennings/MPU6050/tree/master/examples/Pid
