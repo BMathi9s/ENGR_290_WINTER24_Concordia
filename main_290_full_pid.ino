@@ -69,7 +69,7 @@ void setup() {
     pinMode(Skirt_fan, OUTPUT);
     
     // Initialize serial communication
-    Serial.begin(9600);
+    Serial.begin(115200); //set up as high as possible to keep the mpu from drifting
     // Initialize MPU6050 and I2C
     mpu6050_begin();
     // Initialize PID variables
